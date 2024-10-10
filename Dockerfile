@@ -7,7 +7,7 @@ COPY package-lock.json .
 RUN npm ci
 COPY / .
 
-ARG PUBLIC_URL=/studio
+ARG PUBLIC_PATH=/studio
 ARG SETTINGS_PATH=/ui/config/studio/settings.toml
 ARG VERSION=unknown
 ARG BUILD_DATE=unknown
@@ -17,12 +17,12 @@ RUN COMMIT_SHA=${GIT_COMMIT} npm run build:release
 
 FROM rg.nl-ams.scw.cloud/shio-solutions/infra/static-site:1
 
-ARG PUBLIC_URL=/studio
+ARG PUBLIC_PATH=/studio
 ARG VERSION=unknown
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
 
-COPY --from=build /src/build "/www/${PUBLIC_URL}"
+COPY --from=build /src/build "/www/${PUBLIC_PATH}"
 
 LABEL maintainer                             "shio solutions GmbH <dev@shio.solutions>"
 LABEL org.opencontainers.image.title         "Opencast Studio"
