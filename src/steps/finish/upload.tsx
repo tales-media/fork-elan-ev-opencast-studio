@@ -6,7 +6,7 @@ import {
   useController, useForm,
 } from "react-hook-form";
 import { FiUpload } from "react-icons/fi";
-import { LuCheckCircle2 } from "react-icons/lu";
+import { LuCircleCheckBig } from "react-icons/lu";
 import { ProtoButton, Spinner, match, notNullish, unreachable, useColorScheme } from "@opencast/appkit";
 
 import { useDispatch, useStudioState } from "../../studio-state";
@@ -123,12 +123,14 @@ export const UploadBox: React.FC = () => {
     progressHistory = [];
 
     const dispatchError = (msg: string) => dispatch({ type: "UPLOAD_ERROR", msg });
-    match(result, {
+    console.log({ result });
+    const _ = match(result, {
       "success": () => dispatch({ type: "UPLOAD_SUCCESS" }),
       "network_error": () => dispatchError(t("steps.finish.upload.upload-network-error")),
       "not_authorized": () => dispatchError(t("steps.finish.upload.upload-not-authorized")),
       "unexpected_response": () => dispatchError(t("steps.finish.upload.upload-invalid-response")),
-    }, () => dispatchError(t("steps.finish.upload.upload-unknown-error")));
+      "unknown_error": () => dispatchError(t("steps.finish.upload.upload-unknown-error")),
+    });
   };
 
   switch (uploadState.state) {
@@ -220,6 +222,7 @@ const UploadForm: React.FC<UploadFormProps> = ({ handleUpload }) => {
     if (presenterValue !== presenter) {
       dispatch({ type: "UPDATE_PRESENTER", value: presenterValue });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const configurableServerUrl = settingsManager.isConfigurable("opencast.serverUrl");
@@ -251,26 +254,24 @@ const UploadForm: React.FC<UploadFormProps> = ({ handleUpload }) => {
       ...ocData,
     });
 
-    const error = match(oc.getState(), {
-      "logged_in": () => {
-        opencast.setGlobalInstance(oc);
-        settingsManager.saveSettings({ opencast: ocData });
-        return null;
-      },
-      "incorrect_login": () => opencast.isLoginProvided()
-        ? t("steps.finish.upload.settings-invalid-provided-login")
-        : t("steps.finish.upload.settings-invalid-login-data"),
-      "network_error": () => t("steps.finish.upload.upload-network-error"),
-      "invalid_response": () => t("steps.finish.upload.upload-invalid-response"),
-      "response_not_ok": () => t("steps.finish.upload.upload-invalid-response"),
-    }, () => unreachable());
-
-    if (error) {
-      dispatch({ type: "UPLOAD_ERROR", msg: error });
-      setState("idle");
-    } else {
+    const ocState = oc.getState();
+    if (ocState === "logged_in") {
+      opencast.setGlobalInstance(oc);
+      settingsManager.saveSettings({ opencast: ocData });
       // The connection to Opencast works -> now actually start the upload.
       await handleUpload(data);
+    } else {
+      const error = match(ocState, {
+        "incorrect_login": () => opencast.isLoginProvided()
+          ? t("steps.finish.upload.settings-invalid-provided-login")
+          : t("steps.finish.upload.settings-invalid-login-data"),
+        "network_error": () => t("steps.finish.upload.upload-network-error"),
+        "invalid_response": () => t("steps.finish.upload.upload-invalid-response"),
+        "response_not_ok": () => t("steps.finish.upload.upload-invalid-response"),
+      }) ?? unreachable();
+
+      dispatch({ type: "UPLOAD_ERROR", msg: error });
+      setState("idle");
     }
   };
 
@@ -540,7 +541,7 @@ const SeriesSelect: React.FC<SeriesSelectProps> = ({ formProps, showOpencastSect
       result => {
         const options = [...result.entries()].map(([value, label]) => ({ value, label }));
         options.sort(
-          (a, b) => a.label.localeCompare(b.label, i18n.language, { sensitivity: "base" })
+          (a, b) => a.label.localeCompare(b.label, i18n.language, { sensitivity: "base" }),
         );
 
         // If a seriesID is given, make the select use that as default value.
@@ -563,7 +564,7 @@ const SeriesSelect: React.FC<SeriesSelectProps> = ({ formProps, showOpencastSect
         setOptions("error");
       },
     );
-  }, [opencast]);
+  }, [opencast, t, i18n.language, seriesId]);
 
   const inputId = useId();
   const errorId = useId();
@@ -773,7 +774,7 @@ const UploadSuccess = () => {
         lineHeight: 0,
         color: COLORS.accent5,
       }}>
-        <LuCheckCircle2 />
+        <LuCircleCheckBig />
       </div>
       <div>{t("steps.finish.upload.complete-explanation")}</div>
     </GreyInnerBox>

@@ -1,5 +1,5 @@
 import * as path from "path";
-import { CallableOption } from "webpack-cli";
+import { CallableWebpackConfiguration } from "webpack-cli";
 import { DefinePlugin } from "webpack";
 import HtmlWebpackPlugin from "html-webpack-plugin";
 import CopyPlugin from "copy-webpack-plugin";
@@ -13,7 +13,7 @@ if (!publicPath.endsWith("/")) {
   publicPath += "/";
 }
 
-const config: CallableOption = (_env, argv) => ({
+const config: CallableWebpackConfiguration = (_env, argv) => ({
   entry: "./src/index.tsx",
   output: {
     filename: "[name].bundle.js",
@@ -70,6 +70,7 @@ const config: CallableOption = (_env, argv) => ({
     new ForkTsCheckerWebpackPlugin(),
     new ESLintPlugin({
       extensions: ["ts", "tsx", "js"],
+      configType: "flat",
     }),
 
     new HtmlWebpackPlugin({
@@ -80,12 +81,19 @@ const config: CallableOption = (_env, argv) => ({
       patterns: [
         { from: path.join(__dirname, "assets/logo-wide.svg"), to: OUT_PATH },
         { from: path.join(__dirname, "assets/logo-narrow.svg"), to: OUT_PATH },
+        ...argv.mode === "development" ? [{
+          from: path.join(__dirname, "assets/settings.toml"),
+          to: OUT_PATH,
+          noErrorOnMissing: true,
+        }] : [],
 
         // Copy the font related files to output directory
         {
           from: path.join(__dirname, "node_modules/@fontsource-variable/@(roboto-flex|vazirmatn)/index.css"),
           to: "font.css",
-          transformAll: assets => assets.map(assets => assets.data).join("\n").replace(/url\(.\/files\//g, "url(./fonts/"),
+          transformAll: assets => assets.map(assets => assets.data)
+            .join("\n")
+            .replace(/url\(.\/files\//g, "url(./fonts/"),
         },
         ...(
           [
@@ -101,7 +109,8 @@ const config: CallableOption = (_env, argv) => ({
           }))
         ),
         {
-          from: path.join(__dirname, "node_modules/@fontsource-variable/vazirmatn/files/vazirmatn-arabic-wght-normal.woff2"),
+          from: path.join(__dirname,
+            "node_modules/@fontsource-variable/vazirmatn/files/vazirmatn-arabic-wght-normal.woff2"),
           to: path.join(OUT_PATH, "fonts", "vazirmatn-arabic-wght-normal.woff2"),
         },
       ],

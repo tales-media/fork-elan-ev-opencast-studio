@@ -5,6 +5,7 @@ import { unreachable } from "@opencast/appkit";
 
 import { decodeHexString, usePresentContext } from "./util";
 import { DEFINES } from "./defines";
+import { isPlainObject } from "is-plain-object";
 
 const LOCAL_STORAGE_KEY = "ocStudioSettings";
 const CONTEXT_SETTINGS_FILE = "settings.toml";
@@ -24,6 +25,13 @@ type SettingsSource = "src-server"| "src-url" | "src-local-storage";
 const PRESENTER_SOURCES = ["opencast"] as const;
 type PresenterSource = typeof PRESENTER_SOURCES[number];
 
+/** Map from roles to array of permitted actions */
+export type Acl = Map<string, string[]>;
+
+export const DEFAULT_ACL: Acl = new Map([
+  ["{{ user.userRole }}", ["read", "write"]],
+]);
+
 /** Opencast Studio runtime settings. */
 export type Settings = {
   opencast?: {
@@ -35,7 +43,7 @@ export type Settings = {
   upload?: {
     seriesId?: string;
     workflowId?: string;
-    acl?: boolean | string;
+    acl?: boolean | string | Acl;
     dcc?: string;
     titleField?: FormFieldState;
     presenterField?: FormFieldState;
@@ -187,7 +195,7 @@ export class SettingsManager {
           console.warn(
             `URL GET parameter '${key}' is ignored as 'config' is specified. Either specify `
             + " all configuration via the 'config' GET parameter hex string or via direct GET "
-            + "parameters. Mixing is not allowed."
+            + "parameters. Mixing is not allowed.",
           );
         }
       }
@@ -265,7 +273,7 @@ export class SettingsManager {
       return null;
     } else if (!response.ok) {
       console.error(
-        `Fetching '${settingsPath}' failed: ${response.status} ${response.statusText}`
+        `Fetching '${settingsPath}' failed: ${response.status} ${response.statusText}`,
       );
       return null;
     }
@@ -379,10 +387,10 @@ const validate = (
     try {
       const newValue = validation(value, allowParse, src);
       return newValue === undefined ? value : newValue;
-    } catch (e) {
+    } catch (error) {
       console.warn(
-        `Validation of setting '${path}' (${sourceDescription}) with value '${value}' failed: `
-          + `${e}. Ignoring.`
+        `Validation of setting '${path}' (${sourceDescription}) failed -> ignoring...`,
+        { value, error },
       );
       return null;
     }
@@ -406,7 +414,7 @@ const validate = (
         }
       } else {
         console.warn(
-          `'${newPath}' (${sourceDescription}) is not a valid settings key. Ignoring.`
+          `'${newPath}' (${sourceDescription}) is not a valid settings key. Ignoring.`,
         );
       }
     }
@@ -517,7 +525,7 @@ const metaDataField: Validator<FormFieldState> = v => {
   if (![FORM_FIELD_HIDDEN, FORM_FIELD_OPTIONAL, FORM_FIELD_REQUIRED].includes(v)) {
     throw new Error(
       `has to be either '${FORM_FIELD_HIDDEN}', '${FORM_FIELD_OPTIONAL}' or `
-        + `'${FORM_FIELD_REQUIRED}', but is '${v}'`
+        + `'${FORM_FIELD_REQUIRED}', but is '${v}'`,
     );
   }
 
@@ -576,7 +584,27 @@ const SCHEMA = {
         return v;
       }
 
-      throw new Error("needs to be 'true', 'false' or an XML string");
+      let obj = v;
+      if (allowParse && typeof v === "string") {
+        const json = decodeURIComponent(v);
+        obj = JSON.parse(json);
+      }
+
+      if (typeof obj === "object" && obj) {
+        const out = new Map<string, string[]>();
+        for (const [key, value] of Object.entries(obj)) {
+          if (!Array.isArray(value) || value.some(x => typeof x !== "string")) {
+            throw new Error("values of ACL object need to be string arrays");
+          }
+
+          // "Useless" map to get rid of other properties inside array from toml parsing
+          out.set(key, value.map(v => v));
+        }
+
+        return out;
+      }
+
+      throw new Error("needs to be 'true', 'false', an object or an XML string");
     },
     dcc: types.string,
     titleField: metaDataField,
@@ -632,10 +660,12 @@ const SCHEMA = {
 // ==============================================================================================
 
 // Customize array merge behavior
-const merge = (a: Settings, b: Settings): Settings => deepmerge(a, b, { arrayMerge });
-const mergeAll = (array: Settings[]) => deepmerge.all(array, { arrayMerge });
-const arrayMerge: deepmerge.Options["arrayMerge"]
-  = (_destinationArray, sourceArray, _options) => sourceArray;
+const mergeOptions: deepmerge.Options = {
+  arrayMerge: (_destinationArray, sourceArray, _options) => sourceArray,
+  isMergeableObject: isPlainObject,
+};
+const merge = (a: Settings, b: Settings): Settings => deepmerge(a, b, mergeOptions);
+const mergeAll = (array: Settings[]) => deepmerge.all(array, mergeOptions);
 
 
 // ==============================================================================================

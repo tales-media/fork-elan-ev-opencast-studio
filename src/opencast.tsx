@@ -4,7 +4,7 @@ import Mustache from "mustache";
 import { bug } from "@opencast/appkit";
 
 import { recordingFileName, usePresentContext } from "./util";
-import { Settings } from "./settings";
+import { Acl, DEFAULT_ACL, Settings } from "./settings";
 import { Recording } from "./studio-state";
 
 
@@ -135,7 +135,7 @@ export class Opencast {
         && "id" in s
         && "title" in s
         && typeof s.id === "string"
-        && typeof s.title === "string"
+        && typeof s.title === "string",
       )
     );
     if (!isProperForm(series)) {
@@ -343,7 +343,7 @@ export class Opencast {
     let headers = {};
     if (this.#login !== true && this.#login?.username && this.#login?.password) {
       const encoded = btoa(unescape(encodeURIComponent(
-        this.#login.username + ":" + this.#login.password
+        this.#login.username + ":" + this.#login.password,
       )));
       headers = { "Authorization": `Basic ${encoded}` };
     }
@@ -427,7 +427,7 @@ export class Opencast {
 
       // Add metadata to media package
       mediaPackage = await this.addDcCatalog(
-        { mediaPackage, uploadSettings, title, presenter, series, startTime, endTime }
+        { mediaPackage, uploadSettings, title, presenter, series, startTime, endTime },
       );
 
       // Set appropriate ACL unless the configuration says no.
@@ -437,7 +437,7 @@ export class Opencast {
 
       // Add all recordings (this is the actual upload).
       mediaPackage = await this.uploadTracks(
-        { mediaPackage, recordings, onProgress, title, presenter }
+        { mediaPackage, recordings, onProgress, title, presenter },
       );
 
       if (start != null || end != null) {
@@ -513,9 +513,10 @@ export class Opencast {
     mediaPackage: string;
     uploadSettings: Settings["upload"];
   }) {
-    const template = uploadSettings?.acl === true || (!uploadSettings?.acl)
-      ? DEFAULT_ACL_TEMPLATE
-      : uploadSettings?.acl;
+    const aclConfig = uploadSettings?.acl;
+    const template = (aclConfig === true || !aclConfig)
+      ? aclToXmlTemplate(DEFAULT_ACL)
+      : typeof aclConfig === "string" ? aclConfig : aclToXmlTemplate(aclConfig);
     const acl = this.constructAcl(template);
 
     const body = new FormData();
@@ -583,7 +584,7 @@ export class Opencast {
         // Add HTTP Basic Auth headers if username and password are provided.
         if (this.#login !== true && this.#login?.username && this.#login?.password) {
           const encoded = btoa(unescape(encodeURIComponent(
-            this.#login.username + ":" + this.#login.password
+            this.#login.username + ":" + this.#login.password,
           )));
           xhr.setRequestHeader("Authorization", `Basic ${encoded}`);
         }
@@ -673,7 +674,7 @@ export class Opencast {
 
     if (!hasRoles(this.#currentUser)) {
       // Internal error: this should not happen.
-      throw new Error(`'currentUser' is '${this.#currentUser}' in 'constructAcl'`);
+      throw new Error(`'currentUser' is '${JSON.stringify(this.#currentUser)}' in 'constructAcl'`);
     }
 
     // Prepare template "view": the values that can be used within the template.
@@ -810,6 +811,40 @@ const renderTemplate = (template: string, view: object): string => {
   return out;
 };
 
+const aclToXmlTemplate = (acl: Acl) => {
+  const rules = [...acl.entries()].flatMap(([role, actions], i) => actions.map((action, j) => `
+    <Rule RuleId="${i}:${j}" Effect="Permit">
+      <Target>
+        <Actions>
+          <Action>
+            <ActionMatch MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
+              <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">${action}</AttributeValue>
+              <ActionAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:1.0:action:action-id"
+                DataType="http://www.w3.org/2001/XMLSchema#string"/>
+            </ActionMatch>
+          </Action>
+        </Actions>
+      </Target>
+      <Condition>
+        <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-is-in">
+          <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">${role}</AttributeValue>
+          <SubjectAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:2.0:subject:role"
+            DataType="http://www.w3.org/2001/XMLSchema#string"/>
+        </Apply>
+      </Condition>
+    </Rule>`,
+  ));
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <Policy PolicyId="mediapackage-1"
+      RuleCombiningAlgId="urn:oasis:names:tc:xacml:1.0:rule-combining-algorithm:permit-overrides"
+      Version="2.0"
+      xmlns="urn:oasis:names:tc:xacml:2.0:policy:schema:os">
+      ${rules.join("\n")}
+    </Policy>
+  `;
+};
+
 const DEFAULT_DCC_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
 <dublincore xmlns="http://www.opencastproject.org/xsd/1.0/dublincore/"
             xmlns:dcterms="http://purl.org/dc/terms/"
@@ -823,54 +858,6 @@ const DEFAULT_DCC_TEMPLATE = `<?xml version="1.0" encoding="UTF-8"?>
     </dcterms:temporal>
     <dcterms:spatial>Opencast Studio</dcterms:spatial>
 </dublincore>
-`;
-
-const DEFAULT_ACL_TEMPLATE = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Policy PolicyId="mediapackage-1"
-  RuleCombiningAlgId="urn:oasis:names:tc:xacml:1.0:rule-combining-algorithm:permit-overrides"
-  Version="2.0"
-  xmlns="urn:oasis:names:tc:xacml:2.0:policy:schema:os">
-  <Rule RuleId="user_read_Permit" Effect="Permit">
-    <Target>
-      <Actions>
-        <Action>
-          <ActionMatch MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
-            <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">read</AttributeValue>
-            <ActionAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:1.0:action:action-id"
-              DataType="http://www.w3.org/2001/XMLSchema#string"/>
-          </ActionMatch>
-        </Action>
-      </Actions>
-    </Target>
-    <Condition>
-      <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-is-in">
-        <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">{{ user.userRole }}</AttributeValue>
-        <SubjectAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:2.0:subject:role"
-          DataType="http://www.w3.org/2001/XMLSchema#string"/>
-      </Apply>
-    </Condition>
-  </Rule>
-  <Rule RuleId="user_write_Permit" Effect="Permit">
-    <Target>
-      <Actions>
-        <Action>
-          <ActionMatch MatchId="urn:oasis:names:tc:xacml:1.0:function:string-equal">
-            <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">write</AttributeValue>
-            <ActionAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:1.0:action:action-id"
-              DataType="http://www.w3.org/2001/XMLSchema#string"/>
-          </ActionMatch>
-        </Action>
-      </Actions>
-    </Target>
-    <Condition>
-      <Apply FunctionId="urn:oasis:names:tc:xacml:1.0:function:string-is-in">
-        <AttributeValue DataType="http://www.w3.org/2001/XMLSchema#string">{{ user.userRole }}</AttributeValue>
-        <SubjectAttributeDesignator AttributeId="urn:oasis:names:tc:xacml:2.0:subject:role"
-          DataType="http://www.w3.org/2001/XMLSchema#string"/>
-      </Apply>
-    </Condition>
-  </Rule>
-</Policy>
 `;
 
 const smil = ({ start, end }: { start: number; end: number }) => `
