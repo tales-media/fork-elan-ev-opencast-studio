@@ -1,5 +1,5 @@
 ARG NODE_VERSION=17
-FROM node:${NODE_VERSION}-alpine AS build
+FROM docker.io/library/node:${NODE_VERSION}-alpine AS build
 
 WORKDIR /src
 COPY package.json .
